@@ -63,6 +63,7 @@ def get_af2_emb(af2_embeddings_dir: str, model_id: int, use_pairwise: bool, id_:
         single_repr_fns = sorted(glob.glob(f"{af2_embeddings_dir}/{id_}/*_single_repr_rank_*_model_{model_id+1}_*"))
         pair_repr_fns = sorted(glob.glob(f"{af2_embeddings_dir}/{id_}/*_pair_repr_rank_*_model_{model_id+1}_*"))
 
+
     mat = np.load(single_repr_fns[0]).mean(axis=0)
 
     if use_pairwise:
