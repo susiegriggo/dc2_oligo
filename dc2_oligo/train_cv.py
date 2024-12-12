@@ -1,4 +1,5 @@
 from utils import get_af2_emb
+from loguru import logger
 
 import click
 import sys
@@ -6,10 +7,12 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, StratifiedKFold
 from sklearn.metrics import accuracy_score, f1_score
 import joblib
 import mord
+
+logger.add("training_log.log", rotation="500 MB")
 
 def train_monomer(
     training_data, af2_embeddings_dir: str = '../calc', C=10, balanced=0, dual=1,
@@ -48,12 +51,14 @@ def train_monomer(
     total_iterations = ensemble_size * 5
     iteration = 0
 
+    logger.info("Starting monomer training")
+
     # Loop over the ensemble size
     for j in range(ensemble_size):
         # Loop over the 5 AF2 models
         for i in range(5):
             iteration += 1
-            print(f"Training progress: {iteration}/{total_iterations} iterations completed.")
+            logger.info(f"Training progress: {iteration}/{total_iterations} iterations completed.")
             # Get AF2 embeddings for each PDB ID
             X = np.asarray([get_af2_emb(af2_embeddings_dir, id_=id_, model_id=i, use_pairwise=use_pairwise) for id_ in df['pdb']])
             y = df['y'].values
@@ -96,6 +101,8 @@ def train_monomer(
         joblib.dump(model, f"{output_dir}/model.p")
         df.to_csv(f'{output_dir}/results.csv')
         np.save(f'{output_dir}/internal_representations.npy', internal_representations)
+
+    logger.info(f"Monomer training completed with results: {results_}")
 
     print(results_)
 
@@ -144,17 +151,19 @@ def train_homomer(
     total_iterations = ensemble_size * 5
     iteration = 0
 
+    logger.info("Starting homomer training")
+
     # Loop over the ensemble size
     for j in range(ensemble_size):
         # Loop over the 5 AF2 models
         for i in range(5):
             iteration += 1
-            print(f"Training progress: {iteration}/{total_iterations} iterations completed.")
+            logger.info(f"Training progress: {iteration}/{total_iterations} iterations completed.")
             # Get AF2 embeddings for each PDB ID
             X = np.asarray([get_af2_emb(af2_embeddings_dir, id_=id_, model_id=i, use_pairwise=use_pairwise) for id_ in df['pdb']])
             y = df['y'].values
-            # Initialize KFold cross-validation
-            cv = KFold(n_splits=5, shuffle=True)
+            # Initialize StratifiedKFold cross-validation
+            cv = StratifiedKFold(n_splits=5, shuffle=True)
 
             # Loop over the cross-validation splits
             for k, (tr_idx, te_idx) in enumerate(cv.split(X, y)):
@@ -192,6 +201,8 @@ def train_homomer(
         joblib.dump(model, f"{output_dir}/model.p")
         df.to_csv(f'{output_dir}/results.csv')
         np.save(f'{output_dir}/internal_representations.npy', internal_representations)
+
+    logger.info(f"Homomer training completed with results: {results_}")
 
     print(results_)
 
@@ -239,17 +250,19 @@ def train_homomer_ordinal(
     total_iterations = ensemble_size * 5
     iteration = 0
 
+    logger.info("Starting ordinal homomer training")
+
     # Loop over the ensemble size
     for j in range(ensemble_size):
         # Loop over the 5 AF2 models
         for i in range(5):
             iteration += 1
-            print(f"Training progress: {iteration}/{total_iterations} iterations completed.")
+            logger.info(f"Training progress: {iteration}/{total_iterations} iterations completed.")
             # Get AF2 embeddings for each PDB ID
             X = np.asarray([get_af2_emb(af2_embeddings_dir, id_=id_, model_id=i, use_pairwise=use_pairwise) for id_ in df['pdb']])
             y = df['y'].values
-            # Initialize KFold cross-validation
-            cv = KFold(n_splits=5, shuffle=True)
+            # Initialize StratifiedKFold cross-validation
+            cv = StratifiedKFold(n_splits=5, shuffle=True)
 
             # Loop over the cross-validation splits
             for k, (tr_idx, te_idx) in enumerate(cv.split(X, y)):
@@ -268,7 +281,7 @@ def train_homomer_ordinal(
                 clf.fit(X_tr, y_tr)
                 # Store the predicted probabilities and internal representations
                 results[j, i, te_idx, :] = clf.predict_proba(X_te)
-                internal_representations[j, i, te_idx, :] = clf.decision_function(X_te)
+                internal_representations[j, i, te_idx, :] = clf.predict(X_te)
                 model[f"clf_{j}_{i}_{k}"] = clf
 
     # Calculate the final predictions and evaluation metrics
@@ -285,6 +298,8 @@ def train_homomer_ordinal(
         joblib.dump(model, f"{output_dir}/model.p")
         df.to_csv(f'{output_dir}/results.csv')
         np.save(f'{output_dir}/internal_representations.npy', internal_representations)
+
+    logger.info(f"Ordinal homomer training completed with results: {results_}")
 
     print(results_)
 
@@ -304,7 +319,7 @@ def train_homomer_ordinal(
 @click.option('--training_data', type=str, default=None, help='Path to training data')
 def main(af2_embeddings_dir, kind, regularization, dual, balanced, ensemble_size, use_scaler, use_pairwise, output_dir, training_data):
     try:
-        print("Starting the training process...")
+        logger.info("Starting the training process...")
         if kind == 'monomer':
             results, model, df = train_monomer(training_data, af2_embeddings_dir, regularization, balanced, dual,
                                                ensemble_size, use_pairwise, use_scaler, output_dir)
@@ -314,15 +329,15 @@ def main(af2_embeddings_dir, kind, regularization, dual, balanced, ensemble_size
         elif kind == 'ordinal_homomer':
             results, model, df = train_homomer_ordinal(training_data, af2_embeddings_dir, regularization, balanced, dual,
                                                        ensemble_size, use_pairwise, use_scaler, output_dir)
-        print("Training completed successfully.")
+        logger.info("Training completed successfully.")
     except FileNotFoundError as e:
-        print(f"Error: {e}")
+        logger.error(f"Error: {e}")
         sys.exit(1)
     except ValueError as e:
-        print(f"Error: {e}")
+        logger.error(f"Error: {e}")
         sys.exit(1)
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+        logger.error(f"An unexpected error occurred: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":
