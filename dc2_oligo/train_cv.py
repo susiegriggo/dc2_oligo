@@ -209,18 +209,19 @@ def train_homomer(
     return results_, model, df
 
 
+
 def train_homomer_ordinal(
     training_data, af2_embeddings_dir: str = '../calc', C=10, balanced=0, dual=1,
     ensemble_size=1, use_pairwise=True, use_scaler=True, output_dir: str = None
 ) -> tuple:
     """
-    Train an ensemble of logistic regression models. Same as above but predicts the specific number of subunits in a protein uses ordinal regression
+    Train an ensemble of ordinal regression models (LogisticAT) to predict the specific number of subunits in a protein.
 
     Parameters:
         training_data (str): Path to training data.
         C (int, optional): Regularization parameter. Defaults to 10.
         balanced (int, optional): Whether to balance class weights. Defaults to 0.
-        dual (int, optional): Whether to use dual formulation. Defaults to 1.
+        dual (int, optional): Unused parameter, kept for compatibility. Defaults to 1.
         ensemble_size (int, optional): Number of ensemble models. Defaults to 1.
         use_pairwise (bool, optional): Whether to use pairwise embeddings. Defaults to True.
         use_scaler (bool, optional): Whether to use data scaling. Defaults to True.
@@ -250,7 +251,7 @@ def train_homomer_ordinal(
     total_iterations = ensemble_size * 5
     iteration = 0
 
-    logger.info("Starting ordinal homomer training")
+    logger.info("Starting homomer training")
 
     # Loop over the ensemble size
     for j in range(ensemble_size):
@@ -276,12 +277,20 @@ def train_homomer_ordinal(
                     X_te = sc.transform(X_te)
                     model[f"scaler_{j}_{i}_{k}"] = sc
 
-                # Initialize and train the ordinal logistic regression model
-                clf = mord.LogisticAT(alpha=C)
+                # Initialize and train the LogisticAT model
+                clf = mord.LogisticAT(alpha=1.0 / C)  # alpha is the inverse of the regularization parameter C
                 clf.fit(X_tr, y_tr)
-                # Store the predicted probabilities and internal representations
-                results[j, i, te_idx, :] = clf.predict_proba(X_te)
-                internal_representations[j, i, te_idx, :] = clf.predict(X_te)
+                
+                # Store the predicted probabilities
+                prob_predictions = clf.predict_proba(X_te)
+                results[j, i, te_idx, :] = prob_predictions
+
+                # Calculate decision scores manually
+                log_odds = np.log(prob_predictions + 1e-10)  # Add small constant for numerical stability
+                decision_scores = np.cumsum(log_odds, axis=1)
+                internal_representations[j, i, te_idx, :] = decision_scores
+
+             
                 model[f"clf_{j}_{i}_{k}"] = clf
 
     # Calculate the final predictions and evaluation metrics
@@ -299,11 +308,10 @@ def train_homomer_ordinal(
         df.to_csv(f'{output_dir}/results.csv')
         np.save(f'{output_dir}/internal_representations.npy', internal_representations)
 
-    logger.info(f"Ordinal homomer training completed with results: {results_}")
-
-    print(results_)
+    logger.info(f"Homomer training completed with results: {results_}")
 
     return results_, model, df
+
 
 
 @click.command()
